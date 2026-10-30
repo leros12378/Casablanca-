@@ -1,0 +1,111 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gastro Bestellhilfe – Sprach-Fix</title></head><body><p style="font-family:Arial;padding:20px">Bestellhilfe wird geladen …</p><script>
+/* Loads the unchanged, working original menu from the same GitHub Pages folder,
+   and replaces only its speech module. No external service is involved. */
+(async function(){
+ try {
+  const response=await fetch('./Gastro_Bestellhilfe_NEU.html',{cache:'no-store'});
+  if(!response.ok)throw new Error('Originaldatei nicht gefunden (HTTP '+response.status+')');
+  let html=await response.text();
+  const start=html.indexOf("const panel=document.getElementById('voicepanel')");
+  const end=html.lastIndexOf('</script>');
+  if(start<0||end<start)throw new Error('Sprachmodul in der Originaldatei nicht gefunden');
+  const voiceCode=String.raw`
+(function(){
+ const panel=document.getElementById('voicepanel'),spoken=document.getElementById('spoken'),preview=document.getElementById('voicepreview');
+ const voiceButton=document.getElementById('voice'),closeButton=document.getElementById('closevoice');
+ const micButton=document.getElementById('startmic'),parseButton=document.getElementById('parsevoice');
+ const esc=s=>String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+ const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ß/g,'ss').replace(/\bgyros\b/g,'giros').replace(/\btzatziki\b/g,'zaziki').replace(/weizenbier/g,'weissbier').replace(/weiß/g,'weiss').replace(/\bgrosse[ns]?\b/g,'gross').replace(/\bgrosses\b/g,'gross').replace(/\bkleine[ns]?\b/g,'klein').replace(/[.!?]/g,' ').replace(/\s+/g,' ').trim();
+ const nums={ein:1,eine:1,einen:1,einem:1,eins:1,einmal:1,zwei:2,zweimal:2,drei:3,dreimal:3,vier:4,viermal:4,funf:5,fuenf:5,sechs:6,sieben:7,acht:8,neun:9,zehn:10,elf:11,zwolf:12,dreizehn:13,vierzehn:14,funfzehn:15,sechzehn:16,siebzehn:17,achtzehn:18,neunzehn:19,zwanzig:20,dreissig:30,vierzig:40,funfzig:50};
+ const buttons=[...document.querySelectorAll('.it')];
+ function findItem(raw){
+  let p=norm(raw).replace(/^(bitte|noch|dazu|und|ich mochte|wir nehmen|ich nehme)\s+/g,'').trim();
+  const code=p.match(/^(?:nummer|nr|artikel)\s*0*(\d+)$/);
+  if(code)return buttons.find(b=>b.dataset.code&&parseInt(b.dataset.code,10)===+code[1])||null;
+  const aliases={
+   'bier':'pils 0,3','klein bier':'pils 0,3','klein pils':'pils 0,3','gross bier':'pils 0,4','gross pils':'pils 0,4',
+   'weizen':'erdinger weissbier','weissbier':'erdinger weissbier','erdinger':'erdinger weissbier',
+   'dunkel weizen':'erdinger dunkel','alkoholfrei weizen':'erdinger alkoholfrei',
+   'ouzo':'ouzo kavala','uzo':'ouzo kavala','gyros':'giros',
+   'cola':'cola 0,2','klein cola':'cola 0,2','gross cola':'cola 0,4',
+   'fanta':'fanta 0,2','klein fanta':'fanta 0,2','gross fanta':'fanta 0,4',
+   'sprite':'sprite 0,2','klein sprite':'sprite 0,2','gross sprite':'sprite 0,4',
+   'wasser':'wasser 0,25','klein wasser':'wasser 0,25','gross wasser':'wasser gross 0,75',
+   'alster':'alster 0,3','klein alster':'alster 0,3','gross alster':'alster 0,4',
+   'pils':'pils 0,3','klein pils':'pils 0,3','gross pils':'pils 0,4',
+   'apfelschorle':'apfelschorle 0,2','gross apfelschorle':'apfelschorle 0,4',
+   'kaffee':'tasse kaffee','mokka':'griechischer mokka','cappu':'cappuccino',
+   'retsina':'retsina 0,25','samos':'samos 0,25','rose':'rose garalis 0,25'
+  };
+  // Cola Zero is NOT on the menu: don't silently turn it into ordinary Cola.
+  if(/\bzero\b|\blight\b/.test(p))return null;
+  p=aliases[p]||p;
+  let matches=buttons.filter(b=>norm(b.dataset.n)===p);
+  if(matches.length===1)return matches[0];
+  matches=buttons.filter(b=>norm(b.dataset.n).includes(p));
+  return matches.length===1?matches[0]:null;
+ }
+ let recognition=null,rows=[];
+ function splitOrder(text){
+  // Commas inside sizes (0,3 / 0,4 / 0,25) must remain intact.
+  return text.replace(/(\d),(\d)/g,'$1§$2').replace(/\s+und\s+/gi,';').split(/[;,\n]+/).map(s=>s.replace(/§/g,',').trim()).filter(Boolean);
+ }
+ function qty(s){
+  const p=norm(s);const m=p.match(/^(\d+|[a-z]+)(?:\s*(?:x|mal))?\s+(.+)$/);
+  if(!m)return {count:1,name:s};
+  let n=/^\d+$/.test(m[1])?+m[1]:nums[m[1]];
+  if(n===undefined)return {count:1,name:s};
+  return {count:n,name:m[2]};
+ }
+ function render(){
+  let h='<p><b>Erkannte Positionen kontrollieren:</b></p>';
+  rows.forEach((r,i)=>{
+   h+='<div style="border-bottom:1px solid #ddd;padding:8px 0">'+
+   '<label style="font-size:12px">Menge <input data-qty="'+i+'" type="number" min="1" max="200" value="'+r.count+'" style="width:65px;font-size:16px;padding:5px"></label> '+
+   '<select data-item="'+i+'" style="max-width:70%;font-size:14px;padding:6px">'+
+   '<option value="">— Nicht erkannt: '+esc(r.name)+' —</option>'+
+   buttons.map((b,j)=>'<option value="'+j+'" '+(r.index===j?'selected':'')+'>'+esc(b.dataset.n)+'</option>').join('')+
+   '</select> <button data-remove="'+i+'" style="padding:6px">✕</button></div>';
+  });
+  h+='<p style="font-size:12px">Unbekannte Artikel bitte über die Auswahlliste zuordnen. Nichts wird automatisch hinzugefügt.</p>';
+  h+='<button id="acceptvoice" style="background:#166534;color:white;padding:12px;width:100%">✓ Kontrollierte Bestellung übernehmen</button>';
+  preview.innerHTML=h;
+  preview.querySelectorAll('[data-remove]').forEach(el=>el.onclick=()=>{rows.splice(+el.dataset.remove,1);render()});
+  preview.querySelectorAll('[data-qty]').forEach(el=>el.onchange=()=>{rows[+el.dataset.qty].count=+el.value});
+  preview.querySelectorAll('[data-item]').forEach(el=>el.onchange=()=>{rows[+el.dataset.item].index=el.value===''?-1:+el.value});
+  document.getElementById('acceptvoice').onclick=()=>{
+   if(!rows.length){alert('Keine Positionen vorhanden.');return}
+   if(rows.some(r=>r.index<0)){alert('Bitte alle nicht erkannten Artikel zuordnen oder entfernen.');return}
+   if(rows.some(r=>!Number.isInteger(r.count)||r.count<1||r.count>200)){alert('Bitte gültige Mengen zwischen 1 und 200 eingeben.');return}
+   const total=rows.reduce((n,r)=>n+r.count,0);
+   if(!confirm(total+' Artikel auf Tisch '+T+' übernehmen?'))return;
+   rows.forEach(r=>{const b=buttons[r.index];for(let i=0;i<r.count;i++)add(b.dataset.n,b.dataset.p,b.dataset.c,b.dataset.code)});
+   panel.hidden=true;spoken.value='';preview.innerHTML='';rows=[];
+  };
+ }
+ voiceButton.addEventListener('click',()=>{panel.hidden=false;preview.innerHTML='';spoken.focus()});
+ closeButton.addEventListener('click',()=>{if(recognition)try{recognition.stop()}catch(e){}panel.hidden=true});
+ parseButton.addEventListener('click',()=>{
+  const parts=splitOrder(spoken.value);
+  if(!parts.length){alert('Bitte zuerst eine Bestellung diktieren oder eintippen.');return}
+  rows=parts.map(s=>{const q=qty(s);const b=findItem(q.name);return {name:q.name,count:q.count,index:b?buttons.indexOf(b):-1}});
+  render();
+ });
+ micButton.addEventListener('click',()=>{
+  const R=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!R){alert('Auf diesem iPhone bitte in das Textfeld tippen und das Mikrofon auf der iPhone-Tastatur verwenden.');spoken.focus();return}
+  if(recognition)try{recognition.stop()}catch(e){}
+  recognition=new R();recognition.lang='de-DE';recognition.continuous=true;recognition.interimResults=true;
+  const prefix=spoken.value.trim();let finalText='';
+  recognition.onresult=e=>{let interim='';for(let i=0;i<e.results.length;i++){if(e.results[i].isFinal)finalText+=e.results[i][0].transcript+'; ';else interim+=e.results[i][0].transcript}spoken.value=[prefix,finalText,interim].filter(Boolean).join(' ')};
+  recognition.onerror=e=>{if(e.error!=='no-speech'&&e.error!=='aborted')alert('Mikrofonerkennung nicht verfügbar. Bitte das Mikrofon der iPhone-Tastatur verwenden.')};
+  recognition.onend=()=>{micButton.textContent='🎙 Aufnahme starten'};
+  try{recognition.start();micButton.textContent='⏹ Aufnahme läuft …'}catch(e){alert('Bitte iPhone-Tastaturmikrofon verwenden.')}
+ });
+})();`;
+  html=html.slice(0,start)+voiceCode+'\n'+html.slice(end);
+  // Ensure inline script is executed in the loaded page, not inside this loader.
+  document.open();document.write(html);document.close();
+ }catch(e){document.body.innerHTML='<div style="font-family:Arial;padding:20px"><h2>Bestellhilfe konnte nicht geladen werden</h2><p>'+String(e.message).replace(/</g,'&lt;')+'</p><p>Die Datei Gastro_Bestellhilfe_NEU.html muss im selben GitHub-Ordner liegen.</p></div>'}
+})();
+</script></body></html>
